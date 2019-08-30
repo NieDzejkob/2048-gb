@@ -33,8 +33,6 @@ SECTION "serial",ROM0[$58]
 SECTION "joypad",ROM0[$60]
 	reti
 
-SECTION "bank0",ROM0[$61]
-
 SECTION "romheader",ROM0[$100]
     nop
     jp Start150
@@ -141,28 +139,28 @@ endr
     ld [de], a
     ret
 
-DisableLCD: ; $0061
+DisableLCD:
 	xor a
-	ld [$ff0f],a
-	ld a,[$ffff]
+	ld [rIF],a
+	ld a,[rIE]
 	ld b,a
 	res 0,a
-	ld [$ffff],a
+	ld [rIE],a
 .waitVBlank
-	ld a,[$ff44]
+	ld a,[rLY]
 	cp a,$91
 	jr nz,.waitVBlank
-	ld a,[$ff40]
+	ld a,[rLCDC]
 	and a,$7f	; res 7,a
-	ld [$ff40],a
+	ld [rLCDC],a
 	ld a,b
-	ld [$ffff],a
+	ld [rIE],a
 	ret
 
 EnableLCD:
-	ld a,[$ff40]
+	ld a,[rLCDC]
 	set 7,a
-	ld [$ff40],a
+	ld [rLCDC],a
 	ret
 
 FadeToWhite:
@@ -173,11 +171,11 @@ FateToWhite_:
     call Delay8Frames
     lda [rBGP], %01010100
     call Delay8Frames
-    lda [rBGP], %00000000
+    ld0 [rBGP]
     jp Delay8Frames
 
 FadeFromWhite:
-    lda [rBGP], %00000000
+    ld0 [rBGP]
     call Delay8Frames
     lda [rBGP], %01010100
     call Delay8Frames
@@ -302,32 +300,22 @@ ReadJoypadRegister: ; 15F
 	ld a,%00100000 ; select direction keys
 	ld c,$00
 	ld [rJOYP],a
+REPT 6
 	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
+ENDR
 	cpl ; complement the result so that a set bit indicates a pressed key
 	and a,%00001111
 	swap a ; put direction keys in upper nibble
 	ld b,a
 	ld a,%00010000 ; select button keys
 	ld [rJOYP],a
+REPT 10
 	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
-	ld a,[rJOYP]
+ENDR
 	cpl ; complement the result so that a set bit indicates a pressed key
 	and a,%00001111
 	or b ; put button keys in lower nibble
-	ld [$fff8],a ; save joypad state
+	ld [H_JOY],a ; save joypad state
 	ld a,%00110000 ; unselect all keys
 	ld [rJOYP],a
 	
@@ -343,8 +331,6 @@ ReadJoypadRegister: ; 15F
 	ret nz
 	jp Start150
 	
-	ret
-
 GetRNG:
     ld a, [rDIV]
     ld b, a
@@ -368,7 +354,7 @@ WriteDMACodeToHRAM:
 	ld hl, DMARoutine
 .copyLoop
 	ld a, [hli]
-	ld [$ff00+c], a
+	ldh [c], a
 	inc c
 	dec b
 	jr nz, .copyLoop
@@ -377,7 +363,7 @@ WriteDMACodeToHRAM:
 ; this routine is copied to HRAM and executed there on every VBlank
 DMARoutine:
 	ld a, W_OAM >> 8
-	ld [$ff00+$46], a   ; start DMA
+	ld [rDMA], a   ; start DMA
 	ld a, $28
 .waitLoop               ; wait for DMA to finish
 	dec a
@@ -392,12 +378,6 @@ OpenSRAM:
 	ld [MBC1SRamBank], a
 	ret
 	
-CloseSRAM:
-	xor a
-	ld [MBC1SRamBankingMode], a
-	ld [MBC1SRamEnable], a
-	ret
-
 LoadHighScoreFromSRAM:
 	call OpenSRAM
 	ld hl, $a000
@@ -412,7 +392,7 @@ LoadHighScoreFromSRAM:
     lda [H_HIGHSCORE+2], [hli]
     lda [H_GAMESBEATEN], [hli]
     lda [H_GAMESBEATEN+1], [hli]
-    jp CloseSRAM
+    jr CloseSRAM
 
 WriteHighScoreToSRAM:
 	call OpenSRAM
@@ -424,7 +404,12 @@ WriteHighScoreToSRAM:
     lda [hli], [H_HIGHSCORE+2]
     lda [hli], [H_GAMESBEATEN]
     lda [hli], [H_GAMESBEATEN+1]
-    jp CloseSRAM
+
+CloseSRAM:
+	xor a
+	ld [MBC1SRamBankingMode], a
+	ld [MBC1SRamEnable], a
+	ret
 
 Start:
     di
@@ -449,32 +434,28 @@ Start:
     ; seed the RNG
     ld hl, $C000
     ld l, [hl]
-    ld a, [hl]
-    push af
+    ld e, [hl]
     
     ; fill the memory with zeroes
     ld hl, $C000
+    xor a
 .loop
-    ld a, 0
     ld [hli], a
-    ld a, h
-    cp $e0
-    jr nz, .loop
+    bit 5, h
+    jr z, .loop
     
-    pop af
     ; set up the stack pointer
     ld sp, $dffe
-    push af
 
     ld hl, $ff80
 .loop2
-    ld a, 0
+    xor a
     ld [hli], a
     ld a, h
-    cp $00
+    and a
     jr nz, .loop2
     
-    pop af
+    ld a, e
     ld [H_RNG1], a
     
     call WriteDMACodeToHRAM
@@ -503,9 +484,8 @@ Start:
         
     call EnableLCD
     
-    ld [$ffff], a
     ld a, %00000001
-    ld [$ffff], a
+    ld [rIE], a
     ei
     halt
     xor a
